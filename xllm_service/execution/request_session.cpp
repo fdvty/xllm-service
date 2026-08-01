@@ -148,6 +148,17 @@ bool RequestSession::on_instance_failure(const InstanceFailure& failure) {
     return false;
   }
 
+  const RequestSessionState current_state = state_.load();
+  const bool generation_started =
+      current_state == RequestSessionState::PREFILL_RUNNING ||
+      current_state == RequestSessionState::DECODE_RUNNING;
+  request_->last_transport_result_code =
+      TransportResultCode::STALE_ROUTING_DECISION;
+  request_->last_transport_retryability =
+      generation_started
+          ? TransportRetryability::NOT_RETRYABLE
+          : TransportRetryability::RETRYABLE_BEFORE_FIRST_TOKEN;
+
   llm::RequestOutput output;
   output.service_request_id = request_->service_request_id;
   output.status =

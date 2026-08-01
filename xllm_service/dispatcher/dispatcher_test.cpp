@@ -152,6 +152,52 @@ TEST(DispatcherTest, ReportsInvalidRoutingDecision) {
   EXPECT_EQ(dispatcher.stats().transport_failure_total, 1);
 }
 
+TEST(DispatcherTest, ReportsBackendRpcFailureAsRetryableBeforeFirstToken) {
+  DelayedCompletionService service;
+  brpc::Server server;
+  ASSERT_EQ(server.AddService(&service, brpc::SERVER_DOESNT_OWN_SERVICE), 0);
+  ASSERT_EQ(server.Start("127.0.0.1", brpc::PortRange(20000, 40000), nullptr),
+            0);
+
+  const std::string endpoint =
+      "127.0.0.1:" + std::to_string(server.listen_address().port);
+  Options options;
+  options.timeout_ms(1000).connect_timeout_ms(100);
+  auto pool = std::make_shared<ChannelPool>(options);
+  ASSERT_TRUE(pool->activate(endpoint, "incarnation-1"));
+  server.Stop(0);
+  server.Join();
+
+  std::mutex mutex;
+  std::condition_variable condition;
+  bool observed = false;
+  TransportResult result;
+  Dispatcher dispatcher(pool, [&](const TransportResult& failure) {
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      result = failure;
+      observed = true;
+    }
+    condition.notify_all();
+  });
+
+  xllm::proto::CompletionRequest request;
+  ASSERT_TRUE(dispatcher.dispatch_completion(
+      make_routing_decision(endpoint, "incarnation-1"), "request-1", request));
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    ASSERT_TRUE(condition.wait_for(
+        lock, std::chrono::seconds(5), [&observed]() { return observed; }));
+  }
+
+  EXPECT_EQ(result.code, TransportResultCode::RPC_FAILURE);
+  EXPECT_EQ(result.failure_stage, TransportFailureStage::BEFORE_FIRST_TOKEN);
+  EXPECT_EQ(result.retryability,
+            TransportRetryability::RETRYABLE_BEFORE_FIRST_TOKEN);
+  EXPECT_TRUE(transport_result_is_retryable(result));
+  EXPECT_EQ(dispatcher.stats().inflight, 0);
+}
+
 TEST(DispatcherTest, ReportsUnavailableModelsChannelToCaller) {
   auto pool = std::make_shared<ChannelPool>(
       [](const std::string&) { return std::shared_ptr<brpc::Channel>(); });

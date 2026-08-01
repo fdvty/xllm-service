@@ -267,6 +267,29 @@ TEST(RequestSessionTest, PrefillFailureOnlyMatchesBeforePrefillCompletes) {
   EXPECT_EQ(output_count, 1);
   EXPECT_EQ(terminal_count, 1);
   EXPECT_EQ(session.state(), RequestSessionState::CANCELLED);
+  EXPECT_EQ(request->last_transport_result_code,
+            TransportResultCode::STALE_ROUTING_DECISION);
+  EXPECT_EQ(request->last_transport_retryability,
+            TransportRetryability::RETRYABLE_BEFORE_FIRST_TOKEN);
+}
+
+TEST(RequestSessionTest, InstanceFailureAfterGenerationIsNotRetryable) {
+  auto request = make_request();
+  RequestSession session(
+      request,
+      [](llm::RequestOutput) { return true; },
+      []() { return false; },
+      {},
+      {});
+
+  ASSERT_TRUE(session.on_dispatched());
+  ASSERT_TRUE(session.on_generation(make_output(true, false)));
+  EXPECT_TRUE(session.on_instance_failure(
+      {"prefill-0", "prefill-incarnation", InstanceType::DEFAULT}));
+  EXPECT_EQ(request->last_transport_result_code,
+            TransportResultCode::STALE_ROUTING_DECISION);
+  EXPECT_EQ(request->last_transport_retryability,
+            TransportRetryability::NOT_RETRYABLE);
 }
 
 TEST(RequestSessionTest, OutputFailureTerminatesSuccessfulGeneration) {
