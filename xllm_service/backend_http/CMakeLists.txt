@@ -23,4 +23,6 @@ cc_test(
     :backend_http
     GTest::gtest_main
 )
-target_link_libraries(request_context_test PRIVATE brpc-static)
+if(TARGET request_context_test)
+  target_link_libraries(request_context_test PRIVATE brpc-static)
+endif()

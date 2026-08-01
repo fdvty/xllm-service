@@ -53,4 +53,6 @@ cc_test(
     glog::glog
     proto::proto_rpc_service
 )
-target_link_libraries(global_kvcache_mgr_match_test PRIVATE brpc-static cppzmq)
+if(TARGET global_kvcache_mgr_match_test)
+  target_link_libraries(global_kvcache_mgr_match_test PRIVATE brpc-static cppzmq)
+endif()
