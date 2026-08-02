@@ -28,6 +28,11 @@ namespace xllm_service {
 
 struct RequestContext {
   bool has_llm_d_context = false;
+  std::string request_id;
+  std::string traceparent;
+  std::string tenant_id;
+  std::string service_tier;
+  std::string slo_class;
   std::string inference_fairness_id = "default-flow";
   std::string inference_objective;
   std::string model_name_rewrite;

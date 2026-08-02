@@ -400,6 +400,19 @@ std::shared_ptr<Request> XllmHttpServiceImpl::generate_request(
   // create xllm_service request_id: service_request_id
   request->service_request_id = generate_service_request_id(method);
 
+  const auto& context = request->request_context;
+  nlohmann::json identity_event = {
+      {"event", "request_context_accepted"},
+      {"request_id", context.request_id},
+      {"service_request_id", request->service_request_id},
+      {"traceparent", context.traceparent},
+      {"tenant_id", context.tenant_id},
+      {"service_tier", context.service_tier},
+      {"slo_class", context.slo_class},
+      {"method", method},
+  };
+  LOG(INFO) << identity_event.dump();
+
   if (req_pb->has_stream()) {
     request->stream = req_pb->stream();
   }

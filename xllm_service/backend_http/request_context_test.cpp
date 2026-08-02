@@ -23,6 +23,13 @@ namespace {
 
 TEST(RequestContextTest, ParsesCanonicalLlmDHeaders) {
   brpc::Controller controller;
+  controller.http_request().SetHeader("x-request-id", "request-observe-1");
+  controller.http_request().SetHeader(
+      "traceparent",
+      "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+  controller.http_request().SetHeader("x-maas-tenant-id", "retail-search");
+  controller.http_request().SetHeader("x-maas-service-tier", "high");
+  controller.http_request().SetHeader("x-maas-slo-class", "latency");
   controller.http_request().SetHeader("x-llm-d-inference-fairness-id",
                                       "tenant-a");
   controller.http_request().SetHeader("x-llm-d-inference-objective",
@@ -34,6 +41,12 @@ TEST(RequestContextTest, ParsesCanonicalLlmDHeaders) {
   RequestContext context = parse_request_context(controller);
 
   EXPECT_TRUE(context.has_llm_d_context);
+  EXPECT_EQ(context.request_id, "request-observe-1");
+  EXPECT_EQ(context.traceparent,
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+  EXPECT_EQ(context.tenant_id, "retail-search");
+  EXPECT_EQ(context.service_tier, "high");
+  EXPECT_EQ(context.slo_class, "latency");
   EXPECT_EQ(context.inference_fairness_id, "tenant-a");
   EXPECT_EQ(context.inference_objective, "premium-traffic");
   EXPECT_EQ(context.model_name_rewrite, "qwen3");
