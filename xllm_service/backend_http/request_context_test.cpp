@@ -25,8 +25,7 @@ TEST(RequestContextTest, ParsesCanonicalLlmDHeaders) {
   brpc::Controller controller;
   controller.http_request().SetHeader("x-request-id", "request-observe-1");
   controller.http_request().SetHeader(
-      "traceparent",
-      "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+      "traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
   controller.http_request().SetHeader("x-maas-tenant-id", "retail-search");
   controller.http_request().SetHeader("x-maas-service-tier", "high");
   controller.http_request().SetHeader("x-maas-slo-class", "latency");
