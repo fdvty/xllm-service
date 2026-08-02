@@ -23,6 +23,9 @@ limitations under the License.
 #include "common/utils.h"
 
 namespace xllm_service {
+namespace {
+constexpr auto kEtcdRequestTimeout = std::chrono::seconds(2);
+}  // namespace
 
 std::string get_event_key(const etcd::Event& event) {
   if (event.event_type() == etcd::Event::EventType::DELETE_ &&
@@ -60,6 +63,7 @@ EtcdClient::EtcdClient(const std::string& etcd_addr,
     : client_(etcd_addr),
       etcd_addr_(etcd_addr),
       etcd_namespace_prefix_(utils::normalize_etcd_namespace(etcd_namespace)) {
+  client_.set_grpc_timeout(kEtcdRequestTimeout);
   LOG(INFO) << "EtcdClient init put start!";
   auto response = client_.put(namespaced_key("XLLM_PING"), "PING");
   LOG(INFO) << "EtcdClient init put end!";
@@ -76,6 +80,7 @@ EtcdClient::EtcdClient(const std::string& etcd_addr,
     : client_(etcd_addr, username, password),
       etcd_addr_(etcd_addr),
       etcd_namespace_prefix_(utils::normalize_etcd_namespace(etcd_namespace)) {
+  client_.set_grpc_timeout(kEtcdRequestTimeout);
   LOG(INFO) << "EtcdClient init put start!";
   auto response = client_.put(namespaced_key("XLLM_PING"), "PING");
   LOG(INFO) << "EtcdClient init put end!";
@@ -105,17 +110,69 @@ bool EtcdClient::set(const std::string& key, const std::string& value) {
 bool EtcdClient::set(const std::string& key,
                      const std::string& value,
                      const int ttl) {
-  auto keep_alive = std::make_shared<etcd::KeepAlive>(client_, ttl);
-  etcdv3::Transaction transaction;
-  transaction.add_compare_create(namespaced_key(key), 0);
-  transaction.add_success_put(namespaced_key(key), value, keep_alive->Lease());
-  etcd::Response response = client_.txn(transaction);
-  if (response.is_ok()) {
-    keep_alives_.emplace_back(std::move(keep_alive));
-    return true;
-  } else {
-    keep_alive->Cancel();
-    return false;
+  return create_with_lease(key, value, ttl).created;
+}
+
+EtcdKeyLookupResult EtcdClient::lookup(const std::string& key) {
+  try {
+    const etcd::Response response = client_.get(namespaced_key(key));
+    if (response.is_ok()) {
+      return {EtcdKeyLookupStatus::FOUND,
+              response.value().as_string(),
+              response.value().lease(),
+              {}};
+    }
+    if (response.error_code() == etcd::ERROR_KEY_NOT_FOUND) {
+      return {EtcdKeyLookupStatus::NOT_FOUND, {}, 0, {}};
+    }
+    return {EtcdKeyLookupStatus::UNAVAILABLE,
+            {},
+            0,
+            response.error_message()};
+  } catch (const std::exception& error) {
+    return {EtcdKeyLookupStatus::UNAVAILABLE, {}, 0, error.what()};
+  }
+}
+
+EtcdLeaseCreateResult EtcdClient::create_with_lease(
+    const std::string& key,
+    const std::string& value,
+    int ttl) {
+  std::shared_ptr<etcd::KeepAlive> keep_alive;
+  try {
+    keep_alive = std::make_shared<etcd::KeepAlive>(client_, ttl);
+    if (keep_alive->Lease() <= 0) {
+      keep_alive->Cancel();
+      return {false, 0, "etcd returned an invalid lease"};
+    }
+    etcdv3::Transaction transaction;
+    transaction.add_compare_create(namespaced_key(key), 0);
+    transaction.add_success_put(
+        namespaced_key(key), value, keep_alive->Lease());
+    const etcd::Response response = client_.txn(transaction);
+    if (!response.is_ok()) {
+      keep_alive->Cancel();
+      return {false, 0, response.error_message()};
+    }
+
+    std::shared_ptr<etcd::KeepAlive> previous;
+    {
+      std::lock_guard<std::mutex> lock(keep_alives_mutex_);
+      auto existing = keep_alives_.find(key);
+      if (existing != keep_alives_.end()) {
+        previous = std::move(existing->second);
+      }
+      keep_alives_[key] = keep_alive;
+    }
+    if (previous != nullptr) {
+      previous->Cancel();
+    }
+    return {true, keep_alive->Lease(), {}};
+  } catch (const std::exception& error) {
+    if (keep_alive != nullptr) {
+      keep_alive->Cancel();
+    }
+    return {false, 0, error.what()};
   }
 }
 

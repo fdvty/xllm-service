@@ -32,6 +32,18 @@ DEFINE_COUNTER(xservice_heartbeat_total,
                "Total number of xllm instance heartbeats received");
 DEFINE_COUNTER(xservice_heartbeat_xtensor_total,
                "Total number of xllm instance heartbeats with XTensor info");
+DEFINE_GAUGE(xservice_registration_healthy,
+             "Whether the current xllm-service registration lease is owned");
+DEFINE_COUNTER(xservice_registration_reconcile_total,
+               "Total number of xllm-service registration reconcile cycles");
+DEFINE_COUNTER(xservice_registration_attempt_total,
+               "Total number of xllm-service registration create attempts");
+DEFINE_COUNTER(xservice_registration_success_total,
+               "Total number of successful xllm-service registrations");
+DEFINE_COUNTER(xservice_registration_recovery_total,
+               "Total number of recovered xllm-service registrations");
+DEFINE_COUNTER(xservice_registration_failure_total,
+               "Total number of failed xllm-service registration checks");
 DEFINE_COUNTER(kv_event_zmq_received_total,
                "Total number of KV cache events received through ZMQ");
 DEFINE_COUNTER(kv_event_zmq_snapshot_received_total,
