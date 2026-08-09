@@ -40,6 +40,11 @@ constexpr char kRoutingVersionHeader[] = "x-llm-d-routing-decision-version";
 constexpr char kPrefillEndpointHeader[] = "x-llm-d-prefill-endpoint";
 constexpr char kDecodeEndpointHeader[] = "x-llm-d-decode-endpoint";
 constexpr char kRoutingAttemptHeader[] = "x-llm-d-routing-attempt";
+constexpr char kRequestIdHeader[] = "x-request-id";
+constexpr char kTraceparentHeader[] = "traceparent";
+constexpr char kTenantIdHeader[] = "x-maas-tenant-id";
+constexpr char kServiceTierHeader[] = "x-maas-service-tier";
+constexpr char kSloClassHeader[] = "x-maas-slo-class";
 
 const std::string* get_header(const brpc::Controller& controller,
                               const char* header,
@@ -101,6 +106,13 @@ const std::string* get_exact_header(const brpc::Controller& controller,
   return value;
 }
 
+std::string get_exact_string_header(const brpc::Controller& controller,
+                                    const char* header,
+                                    bool* found) {
+  const std::string* value = get_exact_header(controller, header, found);
+  return value == nullptr ? "" : *value;
+}
+
 bool parse_uint32_header(const std::string* value, uint32_t* output) {
   if (value == nullptr || value->empty() || output == nullptr) {
     return false;
@@ -124,6 +136,17 @@ void invalidate_directive(ExternalRoutingDirective* directive,
 RequestContext parse_request_context(const brpc::Controller& controller) {
   RequestContext context;
   bool found = false;
+
+  context.request_id =
+      get_exact_string_header(controller, kRequestIdHeader, &found);
+  context.traceparent =
+      get_exact_string_header(controller, kTraceparentHeader, &found);
+  context.tenant_id =
+      get_exact_string_header(controller, kTenantIdHeader, &found);
+  context.service_tier =
+      get_exact_string_header(controller, kServiceTierHeader, &found);
+  context.slo_class =
+      get_exact_string_header(controller, kSloClassHeader, &found);
 
   std::string fairness_id = get_string_header(
       controller, kFairnessIdHeader, kFairnessIdAlias, &found);

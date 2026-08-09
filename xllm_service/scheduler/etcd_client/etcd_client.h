@@ -19,6 +19,10 @@ limitations under the License.
 #include <etcd/SyncClient.hpp>
 #include <etcd/Watcher.hpp>
 #include <etcd/v3/Transaction.hpp>
+
+#include <chrono>
+#include <map>
+#include <mutex>
 #include <string>
 #include <unordered_set>
 
@@ -34,6 +38,25 @@ std::string get_event_key(const etcd::Event& event);
 std::string get_event_value(const etcd::Event& event);
 
 std::string get_event_key_suffix(const etcd::Event& event, uint64_t prefix_len);
+
+enum class EtcdKeyLookupStatus {
+  FOUND = 0,
+  NOT_FOUND = 1,
+  UNAVAILABLE = 2,
+};
+
+struct EtcdKeyLookupResult {
+  EtcdKeyLookupStatus status = EtcdKeyLookupStatus::UNAVAILABLE;
+  std::string value;
+  int64_t lease_id = 0;
+  std::string error;
+};
+
+struct EtcdLeaseCreateResult {
+  bool created = false;
+  int64_t lease_id = 0;
+  std::string error;
+};
 
 class EtcdClient {
  public:
@@ -81,6 +104,12 @@ class EtcdClient {
 
   // create key-value with lease and transaction
   bool set(const std::string& key, const std::string& value, const int ttl);
+
+  EtcdKeyLookupResult lookup(const std::string& key);
+
+  EtcdLeaseCreateResult create_with_lease(const std::string& key,
+                                          const std::string& value,
+                                          int ttl);
 
   bool rm(const std::string& key);
 
@@ -157,7 +186,8 @@ class EtcdClient {
   std::string etcd_namespace_prefix_;
   std::mutex watchers_mutex_;
   std::map<std::string, WatcherInfo> watchers_;
-  std::vector<std::shared_ptr<etcd::KeepAlive>> keep_alives_;
+  std::mutex keep_alives_mutex_;
+  std::map<std::string, std::shared_ptr<etcd::KeepAlive>> keep_alives_;
 };
 
 }  // namespace xllm_service

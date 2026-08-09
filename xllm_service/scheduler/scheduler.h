@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <atomic>
+
 #include <nlohmann/json.hpp>
 
 #include "chat_template/jinja_chat_template.h"
@@ -31,6 +33,7 @@ limitations under the License.
 #include "response_handler.h"
 #include "routing/routing_configuration.h"
 #include "schedule_result.h"
+#include "service_registration.h"
 #include "tokenizer/tokenizer.h"
 #include "tokenizer/tokenizer_args.h"
 
@@ -59,7 +62,7 @@ class Scheduler final {
 
   bool handle_instance_heartbeat(const proto::HeartbeatRequest* req);
 
-  void exited() { exited_ = true; }
+  void exited() { exited_.store(true, std::memory_order_release); }
 
   // Returns true if at least one valid instance group is available.
   bool has_available_instances() const;
@@ -95,8 +98,6 @@ class Scheduler final {
 
   void update_master_service_heartbeat();
 
-  bool register_current_service();
-
   void handle_master_service_watch(const etcd::Response& response,
                                    const uint64_t& prefix_len);
 
@@ -130,7 +131,7 @@ class Scheduler final {
   RoutingConfiguration routing_configuration_;
   InstanceLifecycleEventDispatcher lifecycle_events_;
 
-  bool exited_ = false;
+  std::atomic<bool> exited_{false};
   bool is_master_service_ = false;
 
   TokenizerArgs tokenizer_args_;
@@ -139,6 +140,7 @@ class Scheduler final {
   std::unique_ptr<JinjaChatTemplate> chat_template_;
 
   std::shared_ptr<EtcdClient> etcd_client_;
+  std::unique_ptr<ServiceRegistrationManager> service_registration_;
 
   std::unique_ptr<Tokenizer> tokenizer_;
 

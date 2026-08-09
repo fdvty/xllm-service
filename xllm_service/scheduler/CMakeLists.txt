@@ -1,8 +1,34 @@
 include(cc_library)
+include(cc_test)
 
 add_subdirectory(etcd_client)
 add_subdirectory(managers)
 add_subdirectory(loadbalance_policy)
+
+cc_library(
+  NAME
+    service_registration
+  HDRS
+    service_registration.h
+  SRCS
+    service_registration.cpp
+  DEPS
+    :common
+    glog::glog
+)
+
+cc_test(
+  NAME
+    service_registration_test
+  SRCS
+    service_registration_test.cpp
+  DEPS
+    :service_registration
+    GTest::gtest_main
+)
+if(TARGET service_registration_test)
+  target_link_libraries(service_registration_test PRIVATE brpc-static)
+endif()
 
 cc_library(
   NAME
@@ -61,6 +87,7 @@ cc_library(
     :managers
     :request
     :routing
+    :service_registration
     :transport
     :xllm_chat_parse_runtime
     cpprest

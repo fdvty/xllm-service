@@ -6,6 +6,9 @@
 /cmake-build-debug/
 /cmake-build-release/
 
+# macOS
+.DS_Store
+
 # CMake
 /build*
 

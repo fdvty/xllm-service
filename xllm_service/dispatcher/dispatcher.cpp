@@ -197,11 +197,16 @@ class GenerationRpcClosure final : public google::protobuf::Closure {
     if (controller_.Failed()) {
       const bool dispatcher_closed =
           controller_.ErrorCode() == ECANCELED && state_->is_closed();
+      const auto retryability =
+          dispatcher_closed
+              ? TransportRetryability::NOT_RETRYABLE
+              : TransportRetryability::RETRYABLE_BEFORE_FIRST_TOKEN;
       result = make_failure(request_id_,
                             dispatcher_closed
                                 ? TransportResultCode::DISPATCHER_CLOSED
                                 : TransportResultCode::RPC_FAILURE,
-                            controller_.ErrorText());
+                            controller_.ErrorText(),
+                            retryability);
     }
     state_->complete_generation(result, controller_.call_id());
     delete this;
@@ -240,11 +245,16 @@ class ModelsRpcClosure final : public google::protobuf::Closure {
     if (controller_.Failed()) {
       const bool dispatcher_closed =
           controller_.ErrorCode() == ECANCELED && state_->is_closed();
+      const auto retryability =
+          dispatcher_closed
+              ? TransportRetryability::NOT_RETRYABLE
+              : TransportRetryability::RETRYABLE_BEFORE_FIRST_TOKEN;
       result = make_failure("",
                             dispatcher_closed
                                 ? TransportResultCode::DISPATCHER_CLOSED
                                 : TransportResultCode::RPC_FAILURE,
-                            controller_.ErrorText());
+                            controller_.ErrorText(),
+                            retryability);
     }
     state_->complete_models(
         result, response_, callback_, controller_.call_id());

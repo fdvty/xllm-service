@@ -102,7 +102,42 @@ Scheduler::Scheduler(
                                                 options_.etcd_namespace());
   }
 
-  if (!register_current_service()) {
+  const std::string service_key =
+      ETCD_XSERVICE_KEY_PREFIX + options_.service_name();
+  service_registration_ = std::make_unique<ServiceRegistrationManager>(
+      options_.service_name(),
+      [this, service_key]() {
+        const EtcdKeyLookupResult result = etcd_client_->lookup(service_key);
+        switch (result.status) {
+          case EtcdKeyLookupStatus::FOUND:
+            return RegistrationLookupResult{RegistrationLookupStatus::FOUND,
+                                            result.value,
+                                            result.lease_id,
+                                            result.error};
+          case EtcdKeyLookupStatus::NOT_FOUND:
+            return RegistrationLookupResult{RegistrationLookupStatus::MISSING,
+                                            {},
+                                            0,
+                                            {}};
+          case EtcdKeyLookupStatus::UNAVAILABLE:
+            return RegistrationLookupResult{
+                RegistrationLookupStatus::UNAVAILABLE,
+                {},
+                0,
+                result.error};
+        }
+        return RegistrationLookupResult{RegistrationLookupStatus::UNAVAILABLE,
+                                        {},
+                                        0,
+                                        "unknown etcd lookup status"};
+      },
+      [this, service_key]() {
+        const EtcdLeaseCreateResult result = etcd_client_->create_with_lease(
+            service_key, options_.service_name(), kHeartbeatInterval);
+        return RegistrationCreateResult{
+            result.created, result.lease_id, result.error};
+      });
+  if (!service_registration_->start()) {
     LOG(FATAL)
         << "Failed to register current xllm_service in etcd, service_name: "
         << options_.service_name();
@@ -192,9 +227,12 @@ Scheduler::Scheduler(
 }
 
 Scheduler::~Scheduler() {
-  exited_ = true;
+  exited_.store(true, std::memory_order_release);
   if (etcd_client_ != nullptr) {
     etcd_client_->stop_watch();
+  }
+  if (service_registration_ != nullptr) {
+    service_registration_->stop();
   }
   if (heartbeat_thread_ && heartbeat_thread_->joinable()) {
     heartbeat_thread_->join();
@@ -309,7 +347,7 @@ bool Scheduler::uses_legacy_routing() const {
 }
 
 void Scheduler::update_master_service_heartbeat() {
-  while (!exited_) {
+  while (!exited_.load(std::memory_order_acquire)) {
     std::this_thread::sleep_for(std::chrono::seconds(kHeartbeatInterval));
 
     if (global_kvcache_mgr_ != nullptr) {
@@ -320,24 +358,8 @@ void Scheduler::update_master_service_heartbeat() {
   }
 }
 
-bool Scheduler::register_current_service() {
-  const std::string service_key =
-      ETCD_XSERVICE_KEY_PREFIX + options_.service_name();
-
-  if (etcd_client_->set(
-          service_key, options_.service_name(), kHeartbeatInterval)) {
-    return true;
-  }
-
-  LOG(ERROR) << "Service key already exists, registration failed: "
-             << service_key
-             << ". Please ensure service_name is unique across xllm_service "
-                "instances.";
-  return false;
-}
-
 bool Scheduler::handle_instance_heartbeat(const proto::HeartbeatRequest* req) {
-  if (exited_) {
+  if (exited_.load(std::memory_order_acquire)) {
     return false;
   }
   COUNTER_INC(xservice_heartbeat_total);
@@ -366,7 +388,8 @@ bool Scheduler::handle_instance_heartbeat(const proto::HeartbeatRequest* req) {
 
 void Scheduler::handle_master_service_watch(const etcd::Response& response,
                                             const uint64_t& prefix_len) {
-  if (options_.enable_peer_service() || exited_ || response.events().empty()) {
+  if (options_.enable_peer_service() ||
+      exited_.load(std::memory_order_acquire) || response.events().empty()) {
     return;
   }
 
@@ -387,7 +410,7 @@ void Scheduler::handle_master_service_watch(const etcd::Response& response,
 
 void Scheduler::handle_xservice_watch(const etcd::Response& response,
                                       const uint64_t& prefix_len) {
-  if (exited_ || response.events().empty()) {
+  if (exited_.load(std::memory_order_acquire) || response.events().empty()) {
     return;
   }
 
@@ -407,14 +430,16 @@ void Scheduler::handle_xservice_watch(const etcd::Response& response,
       continue;
     }
 
-    if (deleted_service == ETCD_XSERVICE_KEY_PREFIX + options_.service_name()) {
-      LOG(INFO) << "Current xllm_service registration expired, re-registering";
-      register_current_service();
+    if (deleted_service == options_.service_name()) {
+      LOG(INFO) << "Current xllm_service registration may have expired";
+      if (service_registration_ != nullptr) {
+        service_registration_->notify_registration_may_be_missing();
+      }
       continue;
     }
 
     if (!options_.enable_peer_service()) {
-      if (deleted_service == ETCD_MASTER_SERVICE_KEY) {
+      if (deleted_service == ETCD_MASTER_SERVICE_NAME) {
         continue;
       }
 
@@ -775,6 +800,13 @@ nlohmann::json Scheduler::debug_summary() const {
   }
   summary["enable_peer_service"] = options_.enable_peer_service();
   summary["is_master_service"] = is_master_service_;
+  summary["service_registration"] = {
+      {"healthy",
+       service_registration_ != nullptr && service_registration_->healthy()},
+      {"lease_id",
+       service_registration_ != nullptr
+           ? service_registration_->owned_lease_id()
+           : 0}};
   summary["instance_view"] =
       instance_mgr_ ? instance_mgr_->debug_summary() : nlohmann::json::object();
   summary["cache_index"] = global_kvcache_mgr_
